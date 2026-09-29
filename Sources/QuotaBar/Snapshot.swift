@@ -26,8 +26,9 @@ enum Snapshot {
     /// serving stale numbers, and one that failed outright.
     private static func sampleStates() -> [ProviderID: ProviderPhase] {
         let now = referenceDate
-        return [
-            .codex: .loaded(UsageSnapshot(
+        // Built one entry at a time. One dictionary literal is too large for
+        // the Swift 6.1 type checker that ships with Command Line Tools.
+        let codex: ProviderPhase = .loaded(UsageSnapshot(
                 planName: "Pro",
                 account: "dev@example.com",
                 windows: [
@@ -51,8 +52,8 @@ enum Snapshot {
                     ResetCredit(title: "Full reset (Weekly + 5 hr)", expiresAt: Date().addingTimeInterval(5 * 86_400 + 18 * 3600 + 60)),
                     ResetCredit(title: "Full reset (Weekly + 5 hr)", expiresAt: Date().addingTimeInterval(18 * 86_400 + 23 * 3600 + 60)),
                     ResetCredit(title: "Full reset (Weekly + 5 hr)", expiresAt: Date().addingTimeInterval(19 * 86_400 + 22 * 3600 + 60)),
-                ]))),
-            .claude: .loaded(UsageSnapshot(
+                ])))
+        let claude: ProviderPhase = .loaded(UsageSnapshot(
                 windows: [
                     UsageWindow(
                         title: WindowTitle.forSeconds(18_000),
@@ -74,8 +75,8 @@ enum Snapshot {
                         windowSeconds: 604_800,
                         scope: "Fable"),
                 ],
-                fetchedAt: now)),
-            .cursor: .stale(UsageSnapshot(
+                fetchedAt: now))
+        let cursor: ProviderPhase = .stale(UsageSnapshot(
                 planName: "Pro",
                 windows: [
                     UsageWindow(
@@ -85,10 +86,10 @@ enum Snapshot {
                         resetsAt: now.addingTimeInterval(900_000)),
                 ],
                 fetchedAt: now.addingTimeInterval(-4_200)),
-                error: ProviderError.unauthorized.errorDescription ?? ""),
-            .zai: .failed(ProviderError.notConfigured(hint: ProviderID.zai.setupHint)
-                .errorDescription ?? ""),
-        ]
+                error: ProviderError.unauthorized.errorDescription ?? "")
+        let zai: ProviderPhase = .failed(ProviderError.notConfigured(hint: ProviderID.zai.setupHint)
+            .errorDescription ?? "")
+        return [.codex: codex, .claude: claude, .cursor: cursor, .zai: zai]
     }
 
     private static func sampleCost() -> CostSummary {

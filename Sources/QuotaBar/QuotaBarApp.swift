@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import SwiftUI
 import QuotaCore
 
@@ -19,6 +20,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var store: UsageStore?
     private let coordinators = Coordinators()
+    /// Set when a second launch arrives before Settings has a store.
+    private var showWhenReady = false
+    /// Held for the life of the process. The kernel drops it on exit, so a
+    /// crash cannot leave the app unable to start.
+    private static var instanceLock: Int32 = -1
+    private static let reopenNotification = Notification.Name("bar.quota.QuotaBar.reopen")
 
     static func main() {
         let app = NSApplication.shared
@@ -55,6 +62,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.addItem(editItem)
 
         // ⌘W closes Settings and the other windows the way it does anywhere.
+        // ⌘Q quits. An accessory app does not own the menu bar, so these
+        // equivalents never arrive on their own; `installWindowShortcuts`
+        // is what actually handles the keys.
+        let appMenu = NSMenu(title: "QuotaBar")
+        appMenu.addItem(withTitle: L10n.t("Quit QuotaBar", "退出 QuotaBar"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let appItem = NSMenuItem()
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+
         let window = NSMenu(title: L10n.t("Window", "窗口"))
         window.addItem(withTitle: L10n.t("Close", "关闭"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         let windowItem = NSMenuItem()
@@ -62,6 +78,103 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.addItem(windowItem)
 
         return main
+    }
+
+    /// ⌘Q quits and ⌘W closes the key window.
+    ///
+    /// The menu above is the usual place for both, and it is installed. It
+    /// does not fire: this is an accessory app, so the menu bar belongs to
+    /// whoever is in front, and AppKit never matches those key equivalents.
+    /// Copy and paste still work because the text system binds them itself.
+    /// The menu panel already closes itself on ⌘W; this leaves that event
+    /// alone and handles every window that actually has a close button.
+    private static func installWindowShortcuts() {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+            guard flags == .command, let key = event.charactersIgnoringModifiers?.lowercased() else {
+                return event
+            }
+            switch key {
+            case "q":
+                if !event.isARepeat { NSApp.terminate(nil) }
+                return nil
+            case "w":
+                guard let window = NSApp.keyWindow, window.styleMask.contains(.closable) else { return event }
+                if !event.isARepeat { window.performClose(nil) }
+                return nil
+            default:
+                return event
+            }
+        }
+    }
+
+    /// A menu-bar agent is not brought forward when opened again, so Finder
+    /// and Launchpad start a second process and a second status icon.
+    /// `LSMultipleInstancesProhibited` stops that at Launch Services; this
+    /// covers a second process that still gets as far as `main`. One-shot
+    /// commands (`--json` and the previews) do not take the lock, so they
+    /// can run beside the menu-bar app.
+    private static func anotherInstanceIsRunning() -> Bool {
+        let url = AppSupport.directory.appendingPathComponent("instance.lock")
+        let fd = open(url.path, O_CREAT | O_RDWR, 0o644)
+        guard fd >= 0 else { return false }
+        if flock(fd, LOCK_EX | LOCK_NB) != 0 {
+            close(fd)
+            return true
+        }
+        instanceLock = fd
+        return false
+    }
+
+    private func listenForReopen() {
+        DistributedNotificationCenter.default().addObserver(
+            forName: Self.reopenNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.showRunningApp()
+            }
+        }
+    }
+
+    private func showRunningApp() {
+        guard store != nil else {
+            showWhenReady = true
+            return
+        }
+        SettingsWindow.open()
+    }
+
+    /// A titled, closable window — Settings, the share studio, a login sheet's
+    /// window — is a main window. The menu panel, island and edge dock are
+    /// borderless panels and do not count.
+    private static func countsForDock(_ window: NSWindow) -> Bool {
+        window.styleMask.contains(.titled) && window.styleMask.contains(.closable)
+    }
+
+    private func trackDockIcon() {
+        let center = NotificationCenter.default
+        center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { note in
+            MainActor.assumeIsolated {
+                guard let window = note.object as? NSWindow, Self.countsForDock(window) else { return }
+                guard NSApp.activationPolicy() != .regular else { return }
+                NSApp.setActivationPolicy(.regular)
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
+        center.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { note in
+            let closing = note.object as? NSWindow
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    let stillOpen = NSApp.windows.contains { window in
+                        window !== closing && window.isVisible && Self.countsForDock(window)
+                    }
+                    guard !stillOpen, NSApp.activationPolicy() != .accessory else { return }
+                    NSApp.setActivationPolicy(.accessory)
+                }
+            }
+        }
     }
 
     /// Opening the app while it runs — from Launchpad, Spotlight, or the
@@ -97,11 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Info.plist carries LSUIElement for the packaged app; setting it here
-        // too keeps the dev loop (bare binary, no bundle) out of the Dock.
-        NSApp.setActivationPolicy(.accessory)
-        NSApp.mainMenu = Self.keyEquivalentMenu()
-
+        listenForReopen()
         let arguments = CommandLine.arguments
         // Loading the config applies the saved language. Load it before
         // anything renders, or a preview that sets its own language would
@@ -116,31 +225,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let directory = index + 1 < arguments.count ? arguments[index + 1] : "./snapshots"
             Snapshot.run(directory: directory)
             NSApp.terminate(nil)
+            return
         }
         if let index = arguments.firstIndex(of: "--settings-preview") {
             let directory = index + 1 < arguments.count ? arguments[index + 1] : "./settings"
             Snapshot.settingsPreview(directory: directory)
             NSApp.terminate(nil)
+            return
         }
         if let index = arguments.firstIndex(of: "--projects-preview") {
             let directory = index + 1 < arguments.count ? arguments[index + 1] : "./projects"
             Snapshot.projectsPreview(directory: directory)
             NSApp.terminate(nil)
+            return
         }
         if let index = arguments.firstIndex(of: "--icon-preview") {
             let directory = index + 1 < arguments.count ? arguments[index + 1] : "./icons"
             Snapshot.iconPreview(directory: directory)
             NSApp.terminate(nil)
+            return
         }
         if let index = arguments.firstIndex(of: "--widget-concepts") {
             let directory = index + 1 < arguments.count ? arguments[index + 1] : "./widget-concepts"
             WidgetConceptBoard.render(directory: directory)
             NSApp.terminate(nil)
+            return
         }
         if let index = arguments.firstIndex(of: "--island-preview") {
             let directory = index + 1 < arguments.count ? arguments[index + 1] : "./island"
             Snapshot.islandPreview(directory: directory)
             NSApp.terminate(nil)
+            return
         }
         if let index = arguments.firstIndex(of: "--settings-window") {
             // `--settings-window status` opens straight to a section;
@@ -157,46 +272,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if arguments.contains("--cost") {
             Diagnostics.printCost()
             NSApp.terminate(nil)
+            return
         }
         if arguments.contains("--ledger") {
             Diagnostics.printLedger()
             NSApp.terminate(nil)
+            return
         }
         if arguments.contains("--status") {
             Diagnostics.printStatus()
             NSApp.terminate(nil)
+            return
         }
         if let index = arguments.firstIndex(of: "--provider"), index + 1 < arguments.count {
             Diagnostics.printProvider(arguments[index + 1])
             NSApp.terminate(nil)
+            return
         }
         if arguments.contains("--archive-timing") {
             Diagnostics.printArchiveTiming()
             NSApp.terminate(nil)
+            return
         }
         if let index = arguments.firstIndex(of: "--projects") {
             // `QuotaBar --projects [days]`: tokens per project from the logs, read now.
             let days = index + 1 < arguments.count ? Int(arguments[index + 1]) ?? 30 : 30
             Diagnostics.printProjects(days: days)
             NSApp.terminate(nil)
+            return
         }
         if arguments.contains("--json") {
             // `QuotaBar --json [--force]`: the limits other tools read,
             // through the last readings when they are under five minutes old.
             Diagnostics.printLimitsJSON(force: arguments.contains("--force"))
             NSApp.terminate(nil)
+            return
         }
         if arguments.contains("--credentials") {
             Diagnostics.printCredentials()
             NSApp.terminate(nil)
+            return
         }
 
         // From here on this is the app itself, which runs on and can see a
         // Kimi Code renewal through; the one-off commands above only read.
+        if Self.anotherInstanceIsRunning() {
+            DistributedNotificationCenter.default().postNotificationName(
+                Self.reopenNotification, object: nil, userInfo: nil, deliverImmediately: true)
+            NSApp.terminate(nil)
+            return
+        }
+        // Info.plist carries LSUIElement, so the app lives in the menu bar and
+        // stays out of the Dock until a real window opens. `trackDockIcon`
+        // puts the icon back for that window and takes it away when the last
+        // one closes. The menu-bar item is unaffected either way.
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.mainMenu = Self.keyEquivalentMenu()
+        Self.installWindowShortcuts()
+        trackDockIcon()
         KimiCodeRenewal.allowInThisProcess()
         let store = UsageStore()
         self.store = store
         SettingsWindow.configure(store: store)
+        if showWhenReady { SettingsWindow.open() }
         MenuPanelController.shared.configure(store: store)
         coordinators.start(store: store)
         if let index = arguments.firstIndex(of: "--simulate-reset"), index + 1 < arguments.count,

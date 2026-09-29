@@ -114,9 +114,11 @@ enum ShareTier: String, CaseIterable {
         case (.white, .claudeCode): Color(red: 0.75, green: 0.30, blue: 0.20)
         case (.white, .codexCLI): Color(red: 0.12, green: 0.38, blue: 0.79)
         case (.white, .openCode): Color(red: 0.05, green: 0.45, blue: 0.40)
+        case (.white, .cursor): Color(red: 0.45, green: 0.22, blue: 0.78)
         case (_, .claudeCode): Color(red: 0.96, green: 0.57, blue: 0.42)
         case (_, .codexCLI): Color(red: 0.52, green: 0.80, blue: 0.98)
         case (_, .openCode): Color(red: 0.45, green: 0.90, blue: 0.80)
+        case (_, .cursor): Color(red: 0.78, green: 0.62, blue: 0.98)
         }
     }
 }
@@ -456,8 +458,8 @@ struct ShareStudioView: View {
     private var caption: String {
         let figure = metric == .apiValue ? QuotaFormat.usd(summary.usd) : "\(QuotaFormat.compact(summary.tokens)) tokens"
         return L10n.t(
-            "\(range.displayName): \(figure) of AI coding\(metric == .apiValue ? " at API prices" : ""). Tracked with QuotaBar · https://quota.bar",
-            "\(range.displayName)的 AI 编码用量：\(figure)\(metric == .apiValue ? "（按 API 价格估算）" : "")。用 QuotaBar 记录 · https://quota.bar")
+            "\(range.displayName): \(figure) of AI coding\(metric == .apiValue ? " at API prices" : ""). Tracked with QuotaBar",
+            "\(range.displayName)的 AI 编码用量：\(figure)\(metric == .apiValue ? "（按 API 价格估算）" : "")。用 QuotaBar 记录")
     }
 
     private func shareItems() -> [Any] {

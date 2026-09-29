@@ -281,25 +281,11 @@ final class UsageStore: ObservableObject {
         applyArchive(UsageArchiveStore.shared.current)
         prepareNotifications()
         refreshConfigured()
-        checkForUpdate()
-        startUpdatePolling()
         startAutoRefresh()
         startClock()
         startSystemObservers()
         startStatusPolling()
         startExperience()
-        run.start()
-        // The store lives as long as the app; the centre asks it for the
-        // readings each time it writes.
-        cloudSync.start(
-            enabled: experience.iCloudSync,
-            readings: { [unowned self] in self.cloudReadings() },
-            refreshAll: { [unowned self] in self.refreshForPhone() })
-        relaySync.start(
-            client: { [unowned self] in self.run.relayClient() },
-            readings: { [unowned self] in self.cloudReadings() },
-            refreshAll: { [unowned self] in self.refreshForPhone() },
-            notify: { [unowned self] title, body in self.notifyAboutPhone(title: title, body: body) })
         refreshAll()
     }
 
@@ -1030,6 +1016,7 @@ final class UsageStore: ObservableObject {
         // Refresh published model prices before scanning, so a newly released
         // model is not priced through a stale prefix guess.
         await PricingCatalog.shared.refreshIfNeeded()
+        await refreshCursorUsage()
         let updated = await Task.detached(priority: .utility) {
             UsageArchiveStore.shared.update()
         }.value
@@ -1037,6 +1024,16 @@ final class UsageStore: ObservableObject {
         isComputingCost = false
         isComputingLedger = false
         isUpdatingArchive = false
+    }
+
+    /// Pulls Cursor's per-request usage into the local cache the log scan
+    /// reads. Failure leaves the previous cache in place, so a dropped
+    /// session does not wipe days already archived.
+    private func refreshCursorUsage() async {
+        guard let cookie = try? CursorProvider().cookieHeader(config) else { return }
+        let since = UsageArchiveStore.shared.current.cursorScanStart()
+        guard let events = try? await CursorUsage.fetch(cookieHeader: cookie, since: since) else { return }
+        CursorUsage.store(events, at: CostPaths.default.cursorUsage)
     }
 
     /// Everything local-log shaped, re-derived from the archive.

@@ -132,6 +132,22 @@ public struct UsageArchive: Codable, Equatable, Sendable {
         }.min().flatMap(Self.date(forKey:))
     }
 
+    /// How far back Cursor's account history should be read.
+    ///
+    /// The log scan is incremental once a full pass has happened, which would
+    /// otherwise hide every Cursor day older than that window the first time
+    /// Cursor is added. Until the archive holds any Cursor row, reach back to
+    /// the start of last year — far enough for this year's grid and for a
+    /// rolling month that crosses New Year. After that, follow the log cutoff.
+    public func cursorScanStart(now: Date = Date(), calendar: Calendar = .current) -> Date {
+        let year = calendar.component(.year, from: now)
+        let floor = calendar.date(from: DateComponents(year: year - 1, month: 1, day: 1))
+            ?? now.addingTimeInterval(-400 * 86_400)
+        let hasCursor = days.values.contains { $0[CostSource.cursor.rawValue] != nil }
+        guard hasCursor, let incremental = incrementalCutoff(calendar: calendar) else { return floor }
+        return incremental
+    }
+
     /// Where the next scan should start: two days before the last one, so a
     /// session still being written at the last scan is read in full.
     public func incrementalCutoff(calendar: Calendar = .current) -> Date? {
@@ -255,7 +271,8 @@ public final class UsageArchiveStore: @unchecked Sendable {
         // the scan goes all the way back for it, whatever this archive has.
         let projectCutoff = projects.current.incrementalCutoff() ?? .distantPast
         let cutoff = min(snapshot.incrementalCutoff() ?? .distantPast, projectCutoff)
-        let scan = CostEstimator.archiveScan(paths: paths, since: cutoff, now: now)
+        let scan = CostEstimator.archiveScan(
+            paths: paths, since: cutoff, now: now, cursorSince: snapshot.cursorScanStart(now: now))
         projects.merge(scan.projects, infos: scan.projectRefs, scannedAt: now, full: cutoff == .distantPast)
         lock.lock()
         archive.merge(scan.days, scannedAt: now, full: cutoff == .distantPast)

@@ -79,8 +79,8 @@ struct UsagePane: View {
         let sources = store.ledger.sources.map(\.source.displayName).joined(separator: " / ")
         let scanned = QuotaFormat.age(of: store.ledger.scannedAt)
         return L10n.t(
-            "From this Mac's \(sources) session logs. Tokens include cache reads and writes; cost is an estimate at list prices and cannot see what a plan includes. \(store.ledger.deduplicated) replayed turns dropped. Scanned \(scanned).",
-            "来自本机的 \(sources) 会话日志。token 含缓存读写；费用按公开价目估算，看不到套餐内含的部分。已去重 \(store.ledger.deduplicated) 条回放记录。扫描于\(scanned)。")
+            "From this Mac's \(sources) records. Tokens include cache reads and writes. Claude Code and Codex are priced at list rates and cannot see what a plan includes; Cursor uses the cost Cursor recorded. \(store.ledger.deduplicated) replayed turns dropped. Scanned \(scanned).",
+            "来自本机的 \(sources) 记录。token 含缓存读写。Claude Code 和 Codex 按公开价目估算，看不到套餐内含的部分；Cursor 用的是 Cursor 自己记下的费用。已去重 \(store.ledger.deduplicated) 条回放记录。扫描于\(scanned)。")
     }
 }
 

@@ -23,6 +23,7 @@ final class SpendBreakdownTests: XCTestCase {
         XCTAssertTrue(CostSource.claudeCode.isEstimated)
         XCTAssertTrue(CostSource.codexCLI.isEstimated)
         XCTAssertFalse(CostSource.openCode.isEstimated, "opencode records its own cost")
+        XCTAssertFalse(CostSource.cursor.isEstimated, "cursor reports charged cents")
     }
 
     func testChartColoursAreMutuallyDistinguishable() {

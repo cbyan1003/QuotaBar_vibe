@@ -593,6 +593,7 @@ private struct IslandProviderBlock: View {
         case .claude: .claudeCode
         case .codex: .codexCLI
         case .opencodeGo: .openCode
+        case .cursor: .cursor
         default: nil
         }
     }

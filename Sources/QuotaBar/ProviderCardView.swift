@@ -430,10 +430,6 @@ struct ShareableCard<Content: View>: View {
                 Text("QuotaBar")
                     .font(Design.wordmark(size: 13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.85))
-                Spacer(minLength: 8)
-                Text("quota.bar")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.4))
             }
             .padding(.horizontal, 4)
         }

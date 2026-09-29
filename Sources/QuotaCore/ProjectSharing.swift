@@ -204,7 +204,7 @@ public enum RunUsagePlan {
                                 repo: archive.projects[key]?.repo)
             }
             .sorted { $0.id < $1.id }
-        let rows = days.flatMap { rows(day: $0, archive: archive, sharing: sharing) }
+        let rows = days.flatMap { Self.rows(day: $0, archive: archive, sharing: sharing) }
         return RunUsageBody(timezone: timezone.identifier, days: days, rows: rows, projects: projects)
     }
 

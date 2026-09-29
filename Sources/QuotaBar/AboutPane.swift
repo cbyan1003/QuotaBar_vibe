@@ -39,40 +39,16 @@ struct AboutPane: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Where to find the project, its author and a person to write to.
-            HStack(spacing: Design.space2) {
-                AboutLink(title: L10n.t("Website", "网站"), detail: "quota.bar", mark: .symbol("globe"), url: "https://quota.bar")
-                AboutLink(title: "GitHub", detail: "QuotaBar/QuotaBar", mark: .brand("github"), url: Self.repository)
-                AboutLink(title: "X", detail: "@gentpan", mark: .brand("x"), url: "https://x.com/gentpan")
-                AboutLink(title: L10n.t("Email", "邮件"), detail: "hello@quota.bar", mark: .symbol("envelope"), url: "mailto:hello@quota.bar")
-                Spacer(minLength: 0)
-            }
-            .padding(.top, Design.space1)
-
-            Divider()
-                .padding(.top, Design.space1)
-
-            // This copy: when it was made and what it runs on; and whose it is.
-            HStack(alignment: .top, spacing: Design.space3) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: Design.space1) {
-                        if let updated = Self.updated {
-                            Text(L10n.t("Updated \(updated)", "更新于 \(updated)"))
-                            Text("·")
-                        }
-                        TextLink(L10n.t("Changelog", "更新日志"), url: Self.repository + "/blob/main/CHANGELOG.md")
-                    }
-                    Text(L10n.t("Requires macOS 14 or later", "需要 macOS 14 或更高版本"))
+            VStack(alignment: .leading, spacing: 3) {
+                if let updated = Self.updated {
+                    Text(L10n.t("Updated \(updated)", "更新于 \(updated)"))
                 }
-                Spacer(minLength: Design.space2)
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(Self.copyright)
-                    TextLink(L10n.t("MIT License", "MIT 开源许可"), url: Self.repository + "/blob/main/LICENSE")
-                }
+                Text(L10n.t("Requires macOS 14 or later", "需要 macOS 14 或更高版本"))
             }
             .font(.system(size: 11))
             .monospacedDigit()
             .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
 
         SettingsCard(L10n.t("Your data", "你的数据")) {
@@ -93,8 +69,8 @@ struct AboutPane: View {
                     .foregroundStyle(.secondary)
                 }
                 SettingFootnote(L10n.t(
-                    "With a proxy set, all of it goes through the proxy. Unless you sign in to Quota Run, usage is never sent to QuotaBar's own server.",
-                    "设置了代理时，以上请求都经过代理。除非你登录 Quota Run，你的用量不会发送到 QuotaBar 自己的服务器。"))
+                    "With a proxy set, all of it goes through the proxy. Usage stays on this Mac.",
+                    "设置了代理时，以上请求都经过代理。用量留在本机。"))
                     .padding(.top, 2)
             }
         }
@@ -136,12 +112,8 @@ struct AboutPane: View {
                    "各服务的公开状态页，例如 status.claude.com；"),
             L10n.t("open.er-api.com, once a day, for exchange rates;",
                    "open.er-api.com，每天一次，获取汇率；"),
-            L10n.t("quota.bar, to check for and download updates, and when you send feedback;",
-                   "quota.bar，检查和下载更新，以及在你提交反馈时；"),
-            L10n.t("GitHub, for updates when quota.bar can't be reached, and to fetch model prices;",
-                   "GitHub，连不上 quota.bar 时检查和下载更新，以及获取模型价目表；"),
-            L10n.t("Quota Run at quota.run, only after you sign in there in your browser: the readings, token counts and profile its consent screen lists.",
-                   "quota.run 上的 Quota Run，仅在你通过浏览器在 quota.run 登录之后：上传登录前同意页面列出的读数、token 数量和个人资料。"),
+            L10n.t("GitHub, to fetch published model prices.",
+                   "GitHub，获取公开的模型价目表。"),
         ]
     }
 

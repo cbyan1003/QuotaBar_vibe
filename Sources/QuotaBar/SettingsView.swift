@@ -54,8 +54,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
             L10n.t("Tokens from this Mac's CLI session logs: a year grid and the figures behind it.",
                    "本机 CLI 会话日志里的 token 用量：全年热力图，以及各周期的数据量。")
         case .projects:
-            L10n.t("Where the tokens went: each repository, CLI and way of working, and which projects are public on quota.run.",
-                   "token 用在了哪个项目：每个仓库、每个工具、每种编程方式，以及哪些项目公开到 quota.run。")
+            L10n.t("Where the tokens went: each repository, CLI and way of working.",
+                   "token 用在了哪个项目：每个仓库、每个工具、每种编程方式。")
         case .run:
             L10n.t("Personal records from every reading, and the opt-in leaderboard.",
                    "每次读数都记成个人记录；排行榜需要自愿加入。")
@@ -105,6 +105,13 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .feedback: "text.bubble"
         case .about: "info.circle"
         }
+    }
+
+    /// Quota Run, the iPhone companion, feedback and updates stay in the
+    /// enum so existing call sites still compile, but they are not part of
+    /// this copy of the app.
+    static let visible: [SettingsSection] = allCases.filter {
+        ![.run, .phone, .updates, .feedback].contains($0)
     }
 }
 
@@ -250,14 +257,14 @@ struct SettingsView: View {
     /// belong to any one of them.
     private var nav: some View {
         VStack(spacing: 0) {
-            ForEach(SettingsSection.allCases) { item in
+            ForEach(SettingsSection.visible) { item in
                 sidebarItem(item)
             }
         }
         .background(alignment: .topLeading) {
             SidebarRail(
-                count: SettingsSection.allCases.count,
-                index: SettingsSection.allCases.firstIndex(of: section) ?? 0)
+                count: SettingsSection.visible.count,
+                index: SettingsSection.visible.firstIndex(of: section) ?? 0)
         }
     }
 

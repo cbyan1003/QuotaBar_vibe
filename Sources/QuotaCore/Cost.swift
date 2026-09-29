@@ -7,12 +7,14 @@ public enum CostSource: String, Sendable, CaseIterable, Codable {
     case claudeCode
     case codexCLI
     case openCode
+    case cursor
 
     public var displayName: String {
         switch self {
         case .claudeCode: "Claude Code"
         case .codexCLI: "Codex"
         case .openCode: "OpenCode"
+        case .cursor: "Cursor"
         }
     }
 
@@ -22,7 +24,7 @@ public enum CostSource: String, Sendable, CaseIterable, Codable {
     public var isEstimated: Bool {
         switch self {
         case .claudeCode, .codexCLI: true
-        case .openCode: false
+        case .openCode, .cursor: false
         }
     }
 
@@ -37,6 +39,7 @@ public enum CostSource: String, Sendable, CaseIterable, Codable {
         case .claudeCode: "D97757"  // terracotta, matching Claude's accent
         case .codexCLI: "2563EB"    // deep blue
         case .openCode: "0D9488"    // teal, well clear of the blue
+        case .cursor: "7C3AED"      // violet; Cursor's own teal sits on OpenCode
         }
     }
 }
@@ -294,6 +297,7 @@ extension CostSource {
         case .claudeCode: "claude"
         case .codexCLI: "codex"
         case .openCode: "opencode"
+        case .cursor: "cursor"
         }
     }
 }
@@ -409,17 +413,22 @@ public struct CostPaths: Sendable {
     public var codexSessions: URL
     /// opencode's own SQLite store, which records a cost per session.
     public var openCodeDatabase: URL
+    /// Cursor usage events cached from the account, one JSON file. Cursor does
+    /// not write token counts into a session log the way the CLIs do.
+    public var cursorUsage: URL
 
-    /// `openCodeDatabase` defaults to a path that does not exist, so callers
-    /// that only care about the log-based sources need not name it.
+    /// `openCodeDatabase` and `cursorUsage` default to paths that do not exist,
+    /// so callers that only care about the log-based sources need not name them.
     public init(
         claudeProjects: URL,
         codexSessions: URL,
-        openCodeDatabase: URL = URL(fileURLWithPath: "/nonexistent/opencode.db"))
+        openCodeDatabase: URL = URL(fileURLWithPath: "/nonexistent/opencode.db"),
+        cursorUsage: URL = URL(fileURLWithPath: "/nonexistent/cursor-usage.json"))
     {
         self.claudeProjects = claudeProjects
         self.codexSessions = codexSessions
         self.openCodeDatabase = openCodeDatabase
+        self.cursorUsage = cursorUsage
     }
 
     public static var `default`: CostPaths {
@@ -427,7 +436,8 @@ public struct CostPaths: Sendable {
         return CostPaths(
             claudeProjects: home.appendingPathComponent(".claude/projects"),
             codexSessions: home.appendingPathComponent(".codex/sessions"),
-            openCodeDatabase: home.appendingPathComponent(".local/share/opencode/opencode.db"))
+            openCodeDatabase: home.appendingPathComponent(".local/share/opencode/opencode.db"),
+            cursorUsage: AppSupport.directory.appendingPathComponent("cursor-usage.json"))
     }
 }
 
@@ -455,6 +465,7 @@ public enum CostEstimator {
         var events = scanClaude(root: paths.claudeProjects, cutoff: cutoff)
         events.append(contentsOf: scanCodex(root: paths.codexSessions, cutoff: cutoff))
         events.append(contentsOf: scanOpenCode(database: paths.openCodeDatabase, cutoff: cutoff))
+        events.append(contentsOf: scanCursor(file: paths.cursorUsage, cutoff: cutoff))
 
         let calendar = Calendar.current
         let dayStart = calendar.startOfDay(for: now)
@@ -541,6 +552,7 @@ public enum CostEstimator {
         var events = scanClaude(root: paths.claudeProjects, cutoff: cutoff)
         events.append(contentsOf: scanCodex(root: paths.codexSessions, cutoff: cutoff))
         events.append(contentsOf: scanOpenCode(database: paths.openCodeDatabase, cutoff: cutoff))
+        events.append(contentsOf: scanCursor(file: paths.cursorUsage, cutoff: cutoff))
 
         var seen = Set<String>()
         var perDay: [Date: UsageDay] = [:]
@@ -595,14 +607,24 @@ public enum CostEstimator {
     /// comparison per event and a dictionary write for the recent ones; no
     /// file is read twice. An incremental scan starts two days before the
     /// last one, so it always covers the whole horizon.
-    public static func archiveScan(paths: CostPaths = .default, since cutoff: Date, now: Date = Date()) -> ArchiveScan {
+    public static func archiveScan(
+        paths: CostPaths = .default,
+        since cutoff: Date,
+        now: Date = Date(),
+        cursorSince: Date? = nil) -> ArchiveScan
+    {
         var events = scanClaude(root: paths.claudeProjects, cutoff: cutoff)
         events.append(contentsOf: scanCodex(root: paths.codexSessions, cutoff: cutoff))
         events.append(contentsOf: scanOpenCode(database: paths.openCodeDatabase, cutoff: cutoff))
+        // Cursor's cache is a complete account history, not a tree of files
+        // whose age matches the log cutoff. The first time it is folded in,
+        // the caller reaches further back than the incremental log scan.
+        events.append(contentsOf: scanCursor(file: paths.cursorUsage, cutoff: cursorSince ?? cutoff))
         var seen = Set<String>()
         var out: ArchiveDays = [:]
         var activity = ActivityMinutes(scannedAt: now)
         let recent = now.addingTimeInterval(-ActivityMinutes.horizon)
+        let cursorCutoff = cursorSince ?? cutoff
         // Per day, project, CLI and mode: the day itself, plus the sessions and
         // minutes seen, which only become counts at the end.
         struct ProjectBucket {
@@ -617,7 +639,8 @@ public enum CostEstimator {
             if let key = event.dedupeKey {
                 guard seen.insert(key).inserted else { continue }
             }
-            guard event.timestamp >= cutoff else { continue }
+            let eventFloor = event.source == .cursor ? cursorCutoff : cutoff
+            guard event.timestamp >= eventFloor else { continue }
             let day = UsageArchive.dayKey(event.timestamp)
             var fresh = ArchiveEntry()
             fresh.usd = cost(of: event)
@@ -633,6 +656,10 @@ public enum CostEstimator {
                 activity.add(tokens: count, at: event.timestamp, source: event.source)
             }
 
+            // Cursor's usage events name a model and a cost, not a directory.
+            // Folding them into "unknown" would invent a project that owns
+            // every Cursor token.
+            guard event.cwd != nil || event.repositoryURL != nil || event.source != .cursor else { continue }
             let project = ProjectResolver.resolve(cwd: event.cwd, repositoryURL: event.repositoryURL)
             refs[project.key] = project
             var bucket = buckets[day]?[project.key]?[event.source.rawValue]?[event.mode.rawValue] ?? ProjectBucket()
@@ -851,6 +878,31 @@ public enum CostEstimator {
         }
     }
 
+    // MARK: Cursor (cached account usage events)
+
+    /// Cursor's local database records the conversation, not the bill. The
+    /// events here were fetched from the signed-in account and cached; the
+    /// cost is the one Cursor recorded (`chargedCents`), not a list-price guess.
+    private static func scanCursor(file: URL, cutoff: Date) -> [TokenEvent] {
+        CursorUsage.load(from: file).compactMap { event in
+            guard event.timestamp >= cutoff else { return nil }
+            guard event.input + event.output + event.cacheRead + event.cacheWrite > 0 || event.usd > 0
+            else { return nil }
+            return TokenEvent(
+                timestamp: event.timestamp,
+                source: .cursor,
+                model: event.model,
+                input: event.input,
+                output: event.output,
+                cacheWrite5m: event.cacheWrite,
+                cacheWrite1h: 0,
+                cacheRead: event.cacheRead,
+                dedupeKey: event.dedupeKey,
+                presetCost: event.usd,
+                mode: event.headless ? .cloud : .ide)
+        }
+    }
+
     // MARK: Shared plumbing
 
     private static func walk(
@@ -1060,6 +1112,7 @@ extension ProviderID {
         case .claude: .claudeCode
         case .codex: .codexCLI
         case .opencodeGo: .openCode
+        case .cursor: .cursor
         default: nil
         }
     }

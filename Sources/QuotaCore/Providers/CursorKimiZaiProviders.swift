@@ -5,6 +5,8 @@ import Foundation
 public struct CursorProvider: QuotaProvider {
     public let id = ProviderID.cursor
 
+    public init() {}
+
     public func isConfigured(config: ConfigStore) -> Bool {
         // A manually pasted cookie wins so the user can override a stale local
         // session; otherwise fall back to the session Cursor.app established.
@@ -14,7 +16,7 @@ public struct CursorProvider: QuotaProvider {
     /// The value for the WorkosCursorSessionToken cookie. A pasted credential
     /// is used verbatim; otherwise it is composed from Cursor.app's own
     /// signed-in session, which stores the token as `sub::JWT`.
-    private func cookieHeader(_ config: ConfigStore) throws -> String {
+    public func cookieHeader(_ config: ConfigStore) throws -> String {
         if let raw = config.credential(for: .cursor) {
             if raw.lowercased().contains("workoscursorsessiontoken=") {
                 return raw

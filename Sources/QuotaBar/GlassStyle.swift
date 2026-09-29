@@ -21,6 +21,10 @@ import QuotaCore
 /// on top of it still read as grey, and the owner wanted black. A settings
 /// window is always over the desktop *and* always in front, so it can afford
 /// glass.
+// `Glass` is in the macOS 26 SDK. QuotaBar compiles in Swift 5 language mode,
+// so this keys off the compiler, not `#if swift`: Command Line Tools 26.2
+// (Swift 6.2) includes the API; the older 16.4 tools do not.
+#if compiler(>=6.2)
 @available(macOS 26.0, *)
 private struct LiquidGlassSurface: ViewModifier {
     let radius: CGFloat
@@ -38,6 +42,7 @@ private struct LiquidGlassSurface: ViewModifier {
         content.glassEffect(glass, in: .rect(cornerRadius: radius))
     }
 }
+#endif
 
 /// Pre-26 stand-in: a material fill plus a one-pixel specular edge.
 ///
@@ -91,8 +96,12 @@ private struct GlassSurface: ViewModifier {
                     .fill(Design.surface)
             }
         } else if #available(macOS 26.0, *) {
+            #if compiler(>=6.2)
             content.modifier(
                 LiquidGlassSurface(radius: radius, tint: tint, interactive: interactive))
+            #else
+            content.modifier(FrostedSurface(radius: radius, tint: tint))
+            #endif
         } else {
             content.modifier(FrostedSurface(radius: radius, tint: tint))
         }
@@ -106,11 +115,15 @@ private struct GlassGroup: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
+        #if compiler(>=6.2)
         if !disabled, #available(macOS 26.0, *) {
             GlassEffectContainer(spacing: spacing) { content }
         } else {
             content
         }
+        #else
+        content
+        #endif
     }
 }
 

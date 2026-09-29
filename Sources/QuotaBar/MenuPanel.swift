@@ -346,7 +346,6 @@ struct MenuPanelView: View {
                     if !store.experience.welcomeDismissed {
                         WelcomeCard(store: store)
                     }
-                    UpdateBanner(store: store)
                     if store.experience.showSpendCard {
                         SpendCardView(store: store)
                     }
@@ -712,22 +711,9 @@ private struct OptionsMenuButton: NSViewRepresentable {
             menu.addItem(copy)
             menu.addItem(.separator())
             add(menu, L10n.t("Refresh Everything", "全部刷新"), "r") { [store] in store.forceRefreshAll() }
-            add(menu, L10n.t("Check for Updates…", "检查更新…"), "") { [store] in store.checkForUpdate(manual: true, presenting: true) }
-            if let account = store.run.account {
-                add(menu, "Quota Run · @\(account.username)…", "") {
-                    MenuPanelController.shared.close()
-                    SettingsWindow.open(section: .run)
-                }
-            } else {
-                add(menu, L10n.t("Sign In to Quota Run…", "登录 Quota Run…"), "") {
-                    MenuPanelController.shared.close()
-                    SettingsWindow.open(section: .run, anchor: RunSignInCard.anchor)
-                }
-            }
             add(menu, L10n.t("About QuotaBar", "关于 QuotaBar"), "") {
                 MenuPanelController.shared.close()
-                SettingsWindow.open()
-                NSApp.orderFrontStandardAboutPanel(nil)
+                SettingsWindow.open(section: .about)
             }
             menu.addItem(.separator())
             add(menu, L10n.t("Quit QuotaBar", "退出 QuotaBar"), "q") { NSApp.terminate(nil) }

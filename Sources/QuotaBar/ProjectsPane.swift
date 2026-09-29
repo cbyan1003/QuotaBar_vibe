@@ -295,9 +295,6 @@ private struct ProjectDetailCard: View {
             }
             models
             WeekHourGrid(values: summary.weekHours)
-            if !summary.info.isUnknown {
-                ProjectSharingRow(summary: summary, run: run)
-            }
         }
     }
 

@@ -251,9 +251,6 @@ final class StatusItemCoordinator: NSObject {
         menu.addItem(.separator())
 
         add(menu, L10n.t("Refresh Now", "立即刷新"), "r") { [store] in store.refreshAll() }
-        menu.addItem(updateItem(store: store))
-        menu.addItem(runItem(store: store))
-        add(menu, L10n.t("Feedback…", "反馈…"), "") { SettingsWindow.open(section: .feedback) }
         add(menu, L10n.t("Settings…", "设置…"), ",") { SettingsWindow.open() }
         menu.addItem(.separator())
         add(menu, L10n.t("About QuotaBar", "关于 QuotaBar"), "") { SettingsWindow.open(section: .about) }
