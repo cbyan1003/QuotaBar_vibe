@@ -326,6 +326,9 @@ private struct TokenEvent {
     var mode: CodingMode = .cli
     /// Session the turn belongs to, for counting sessions per project.
     var session: String? = nil
+    /// Copied from another machine. Kept even when the incremental scan is
+    /// only looking at the last couple of days of this Mac's own logs.
+    var historical = false
 }
 
 /// USD per million tokens; `marker` is substring-matched against the logged
@@ -416,6 +419,10 @@ public struct CostPaths: Sendable {
     /// Cursor usage events cached from the account, one JSON file. Cursor does
     /// not write token counts into a session log the way the CLIs do.
     public var cursorUsage: URL
+    /// Session logs copied from another machine. Scanned in full on every
+    /// archive pass so their older days are not dropped by the incremental cutoff.
+    public var extraClaudeProjects: [URL]
+    public var extraCodexSessions: [URL]
 
     /// `openCodeDatabase` and `cursorUsage` default to paths that do not exist,
     /// so callers that only care about the log-based sources need not name them.
@@ -423,21 +430,28 @@ public struct CostPaths: Sendable {
         claudeProjects: URL,
         codexSessions: URL,
         openCodeDatabase: URL = URL(fileURLWithPath: "/nonexistent/opencode.db"),
-        cursorUsage: URL = URL(fileURLWithPath: "/nonexistent/cursor-usage.json"))
+        cursorUsage: URL = URL(fileURLWithPath: "/nonexistent/cursor-usage.json"),
+        extraClaudeProjects: [URL] = [],
+        extraCodexSessions: [URL] = [])
     {
         self.claudeProjects = claudeProjects
         self.codexSessions = codexSessions
         self.openCodeDatabase = openCodeDatabase
         self.cursorUsage = cursorUsage
+        self.extraClaudeProjects = extraClaudeProjects
+        self.extraCodexSessions = extraCodexSessions
     }
 
     public static var `default`: CostPaths {
         let home = FileManager.default.homeDirectoryForCurrentUser
+        let support = AppSupport.directory.appendingPathComponent("imported")
         return CostPaths(
             claudeProjects: home.appendingPathComponent(".claude/projects"),
             codexSessions: home.appendingPathComponent(".codex/sessions"),
             openCodeDatabase: home.appendingPathComponent(".local/share/opencode/opencode.db"),
-            cursorUsage: AppSupport.directory.appendingPathComponent("cursor-usage.json"))
+            cursorUsage: AppSupport.directory.appendingPathComponent("cursor-usage.json"),
+            extraClaudeProjects: [support.appendingPathComponent("claude/projects")],
+            extraCodexSessions: [support.appendingPathComponent("codex/sessions")])
     }
 }
 
@@ -620,6 +634,12 @@ public enum CostEstimator {
         // whose age matches the log cutoff. The first time it is folded in,
         // the caller reaches further back than the incremental log scan.
         events.append(contentsOf: scanCursor(file: paths.cursorUsage, cutoff: cursorSince ?? cutoff))
+        for root in paths.extraClaudeProjects {
+            events.append(contentsOf: historical(scanClaude(root: root, cutoff: .distantPast)))
+        }
+        for root in paths.extraCodexSessions {
+            events.append(contentsOf: historical(scanCodex(root: root, cutoff: .distantPast)))
+        }
         var seen = Set<String>()
         var out: ArchiveDays = [:]
         var activity = ActivityMinutes(scannedAt: now)
@@ -639,7 +659,9 @@ public enum CostEstimator {
             if let key = event.dedupeKey {
                 guard seen.insert(key).inserted else { continue }
             }
-            let eventFloor = event.source == .cursor ? cursorCutoff : cutoff
+            let eventFloor: Date = event.historical
+                ? .distantPast
+                : (event.source == .cursor ? cursorCutoff : cutoff)
             guard event.timestamp >= eventFloor else { continue }
             let day = UsageArchive.dayKey(event.timestamp)
             var fresh = ArchiveEntry()
@@ -699,6 +721,10 @@ public enum CostEstimator {
         lock.lock()
         cache.removeAll()
         lock.unlock()
+    }
+
+    private static func historical(_ events: [TokenEvent]) -> [TokenEvent] {
+        events.map { var copy = $0; copy.historical = true; return copy }
     }
 
     // MARK: Claude Code (~/.claude/projects/**/*.jsonl)

@@ -8,14 +8,28 @@ public struct CodexProvider: QuotaProvider {
     public init() {}
 
     public func isConfigured(config: ConfigStore) -> Bool {
-        LocalCredentials.codexAuth() != nil
+        LocalCredentials.codexAuth() != nil || RelayQuota.isConfigured(config, provider: id)
     }
 
     public func fetch(config: ConfigStore) async throws -> UsageSnapshot {
-        guard let auth = LocalCredentials.codexAuth() else {
-            throw ProviderError.notConfigured(hint: ProviderID.codex.setupHint)
+        let relay = await Self.relayWindow(config)
+        if let auth = LocalCredentials.codexAuth() {
+            do {
+                var snapshot = try await Self.usage(accessToken: auth.accessToken, accountID: auth.accountId)
+                if let relay { snapshot.windows.insert(relay, at: 0) }
+                return snapshot
+            } catch {
+                if let relay { return UsageSnapshot(planName: L10n.t("Relay", "中转站"), windows: [relay]) }
+                throw error
+            }
         }
-        return try await Self.usage(accessToken: auth.accessToken, accountID: auth.accountId)
+        if let relay { return UsageSnapshot(planName: L10n.t("Relay", "中转站"), windows: [relay]) }
+        throw ProviderError.notConfigured(hint: ProviderID.codex.setupHint)
+    }
+
+    private static func relayWindow(_ config: ConfigStore) async -> UsageWindow? {
+        guard RelayQuota.isConfigured(config, provider: .codex) else { return nil }
+        return try? await RelayQuota.window(config: config, provider: .codex)
     }
 
     /// One account's limits, read with that account's own token: the one the
@@ -372,11 +386,13 @@ public struct ClaudeProvider: QuotaProvider {
     public init() {}
 
     public func isConfigured(config: ConfigStore) -> Bool {
-        LocalCredentials.claudeOAuthToken() != nil
+        LocalCredentials.claudeOAuthToken() != nil || RelayQuota.isConfigured(config, provider: id)
     }
 
     public func fetch(config: ConfigStore) async throws -> UsageSnapshot {
+        let relay = await Self.relayWindow(config)
         guard let token = LocalCredentials.claudeOAuthToken() else {
+            if let relay { return UsageSnapshot(planName: L10n.t("Relay", "中转站"), windows: [relay]) }
             throw Self.credentialError(for: LocalCredentials.claudeCredentialState())
         }
         let headers = [
@@ -386,14 +402,25 @@ public struct ClaudeProvider: QuotaProvider {
             "User-Agent": "claude-code/2.1.0",
         ]
         let url = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-        let response = try await HTTP.get(url, headers: headers).requireOK()
-        var snapshot = try Self.parse(response.data)
-        // The usage endpoint does not name the plan; Claude Code's item does.
-        if snapshot.planName == nil { snapshot.planName = LocalCredentials.claudePlanName() }
-        // Nor the account; /api/oauth/profile does. Memoized per token, so
-        // the extra request happens once per sign-in, not once per minute.
-        snapshot.account = await Self.profileEmail(headers: headers, token: token)
-        return snapshot
+        do {
+            let response = try await HTTP.get(url, headers: headers).requireOK()
+            var snapshot = try Self.parse(response.data)
+            // The usage endpoint does not name the plan; Claude Code's item does.
+            if snapshot.planName == nil { snapshot.planName = LocalCredentials.claudePlanName() }
+            // Nor the account; /api/oauth/profile does. Memoized per token, so
+            // the extra request happens once per sign-in, not once per minute.
+            snapshot.account = await Self.profileEmail(headers: headers, token: token)
+            if let relay { snapshot.windows.insert(relay, at: 0) }
+            return snapshot
+        } catch {
+            if let relay { return UsageSnapshot(planName: L10n.t("Relay", "中转站"), windows: [relay]) }
+            throw error
+        }
+    }
+
+    private static func relayWindow(_ config: ConfigStore) async -> UsageWindow? {
+        guard RelayQuota.isConfigured(config, provider: .claude) else { return nil }
+        return try? await RelayQuota.window(config: config, provider: .claude)
     }
 
     /// Three situations behind a missing token, each said as it is: no

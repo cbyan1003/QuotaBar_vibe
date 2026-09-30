@@ -270,7 +270,14 @@ public final class UsageArchiveStore: @unchecked Sendable {
         // The project archive came later: until it has had its own full read,
         // the scan goes all the way back for it, whatever this archive has.
         let projectCutoff = projects.current.incrementalCutoff() ?? .distantPast
-        let cutoff = min(snapshot.incrementalCutoff() ?? .distantPast, projectCutoff)
+        let imported = Self.importedLogStamp(paths)
+        let stampURL = fileURL.deletingLastPathComponent().appendingPathComponent("imported-stamp.txt")
+        let seenImport = try? String(contentsOf: stampURL, encoding: .utf8)
+        // A new batch of logs from another machine has to be read together
+        // with this Mac's own history. An incremental window would keep
+        // whichever side happened to be larger and drop the other.
+        var cutoff = min(snapshot.incrementalCutoff() ?? .distantPast, projectCutoff)
+        if imported != seenImport { cutoff = .distantPast }
         let scan = CostEstimator.archiveScan(
             paths: paths, since: cutoff, now: now, cursorSince: snapshot.cursorScanStart(now: now))
         projects.merge(scan.projects, infos: scan.projectRefs, scannedAt: now, full: cutoff == .distantPast)
@@ -282,7 +289,29 @@ public final class UsageArchiveStore: @unchecked Sendable {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         if let data = try? encoder.encode(copy) { AppSupport.write(data, to: fileURL) }
+        if imported != seenImport {
+            try? imported.write(to: stampURL, atomically: true, encoding: .utf8)
+        }
         return copy
+    }
+
+    /// File count and total bytes of the copied logs. Empty when the folder
+    /// is missing, so a machine with no import does not rescan every launch.
+    private static func importedLogStamp(_ paths: CostPaths) -> String {
+        var count = 0
+        var bytes: Int64 = 0
+        let roots = paths.extraClaudeProjects + paths.extraCodexSessions
+        for root in roots where FileManager.default.fileExists(atPath: root.path) {
+            guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.fileSizeKey]) else { continue }
+            for case let url as URL in enumerator {
+                let name = url.lastPathComponent
+                guard name.hasSuffix(".jsonl") else { continue }
+                count += 1
+                let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+                bytes += Int64(size)
+            }
+        }
+        return "\(count) \(bytes)"
     }
 }
 

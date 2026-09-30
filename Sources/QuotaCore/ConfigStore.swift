@@ -56,6 +56,9 @@ public struct QuotaConfig: Codable, Sendable, Equatable {
     /// double-clicking a row in the provider's card. The menu bar, the island
     /// and the dock keep their own in `ExperiencePrefs.placeWindows`.
     public var headlineWindows: [ProviderID: String]
+    /// Relay base URL per provider (`https://station.example/api/common`).
+    /// The API key stays in the keychain, under `codex.relay` / `claude.relay`.
+    public var relayBases: [ProviderID: String]
     /// Everything added in 0.5 — pace, panel, glow, sharing, privacy.
     public var experience: ExperiencePrefs
 
@@ -99,6 +102,7 @@ public struct QuotaConfig: Codable, Sendable, Equatable {
         widgetPin: ProviderID? = nil,
         displayScreen: String? = nil,
         headlineWindows: [ProviderID: String] = [:],
+        relayBases: [ProviderID: String] = [:],
         experience: ExperiencePrefs = ExperiencePrefs(),
         legacyCredentials: [ProviderID: String] = [:])
     {
@@ -131,6 +135,7 @@ public struct QuotaConfig: Codable, Sendable, Equatable {
         self.widgetPin = widgetPin
         self.displayScreen = displayScreen
         self.headlineWindows = headlineWindows
+        self.relayBases = relayBases
         self.experience = experience
         self.legacyCredentials = legacyCredentials
     }
@@ -145,7 +150,7 @@ public struct QuotaConfig: Codable, Sendable, Equatable {
         case selected, updateFeed, checksForUpdates, updatePolicy
         case dockEdge, dockPosition, dockAlwaysVisible, islandSlots
         case widgetEnabled, widgetDensity, widgetX, widgetY, widgetAlwaysOnTop, widgetScope, islandPin, dockPin, widgetPin
-        case displayScreen, headlineWindows, experience
+        case displayScreen, headlineWindows, relayBases, experience
         case legacyCredentials = "credentials"
     }
 
@@ -212,6 +217,7 @@ public struct QuotaConfig: Codable, Sendable, Equatable {
         displayScreen = (try? container.decodeIfPresent(String.self, forKey: .displayScreen))
             .flatMap { $0.isEmpty ? nil : $0 }
         headlineWindows = QuotaConfig.decodeProviderStrings(from: container, forKey: .headlineWindows)
+        relayBases = QuotaConfig.decodeProviderStrings(from: container, forKey: .relayBases)
         experience = (try? container.decodeIfPresent(ExperiencePrefs.self, forKey: .experience)) ?? ExperiencePrefs()
         // Written before the menu bar, the island and the dock chose for
         // themselves: they were following the card, so they start from its
@@ -331,6 +337,11 @@ public struct QuotaConfig: Codable, Sendable, Equatable {
             try container.encode(
                 Dictionary(uniqueKeysWithValues: headlineWindows.map { ($0.key.rawValue, $0.value) }),
                 forKey: .headlineWindows)
+        }
+        if !relayBases.isEmpty {
+            try container.encode(
+                Dictionary(uniqueKeysWithValues: relayBases.map { ($0.key.rawValue, $0.value) }),
+                forKey: .relayBases)
         }
         // `legacyCredentials` intentionally omitted.
     }
@@ -485,6 +496,41 @@ public final class ConfigStore: @unchecked Sendable {
         credentialCache[id] = value
         lock.unlock()
         return value
+    }
+
+    // MARK: Relay station (URL on disk, key in the keychain)
+
+    public func relayBase(for id: ProviderID) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        let value = config.relayBases[id]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
+    }
+
+    public func setRelayBase(_ value: String?, for id: ProviderID) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        lock.lock()
+        if trimmed.isEmpty { config.relayBases[id] = nil } else { config.relayBases[id] = trimmed }
+        let snapshot = config
+        lock.unlock()
+        save(snapshot)
+    }
+
+    /// Keychain account, distinct from the provider's own credential.
+    public static func relayAccount(_ id: ProviderID) -> String { "\(id.rawValue).relay" }
+
+    public func relayKey(for id: ProviderID) -> String? {
+        let read = credentials.read(account: Self.relayAccount(id))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return read?.isEmpty == false ? read : nil
+    }
+
+    public func setRelayKey(_ value: String?, for id: ProviderID) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            _ = credentials.delete(account: Self.relayAccount(id))
+        } else {
+            _ = credentials.write(trimmed, account: Self.relayAccount(id))
+        }
     }
 
     public func setCredential(_ value: String?, for id: ProviderID) {

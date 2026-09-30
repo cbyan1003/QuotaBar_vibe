@@ -310,7 +310,10 @@ private struct CredentialEditor: View {
 
     @State private var credential: String
     @State private var saved: String
+    @State private var relayBase: String
+    @State private var relayKey: String
     @State private var reveal = false
+    @State private var revealRelay = false
     @Binding var testPhase: ProviderTestPhase
 
     init(store: UsageStore, id: ProviderID, testPhase: Binding<ProviderTestPhase>) {
@@ -320,7 +323,11 @@ private struct CredentialEditor: View {
         let value = ConfigStore.shared.credential(for: id) ?? ""
         _credential = State(initialValue: value)
         _saved = State(initialValue: value)
+        _relayBase = State(initialValue: ConfigStore.shared.relayBase(for: id) ?? "")
+        _relayKey = State(initialValue: ConfigStore.shared.relayKey(for: id) ?? "")
     }
+
+    private var acceptsRelay: Bool { id == .codex || id == .claude }
 
     private var isManual: Bool { id.credentialHint != nil }
     /// Saving, clearing, authorising, signing in — what is left for a line of
@@ -393,6 +400,10 @@ private struct CredentialEditor: View {
                 }
             }
 
+            if acceptsRelay {
+                relayFields
+            }
+
             SettingRow(L10n.t("How to sign in", "如何登录")) {
                 VStack(alignment: .leading, spacing: Design.space2) {
                     Text(id.credentialHint ?? id.setupHint)
@@ -445,6 +456,49 @@ private struct CredentialEditor: View {
         // the text field would collapse the thing you are typing into.
         .contentShape(Rectangle())
         .onTapGesture {}
+    }
+
+    private var relayFields: some View {
+        VStack(alignment: .leading, spacing: Design.space2) {
+            SettingRow(L10n.t("Relay URL", "中转站地址")) {
+                GlassTextField(
+                    placeholder: "https://station.example/api/common",
+                    text: $relayBase,
+                    secure: false,
+                    monospaced: true,
+                    onSubmit: saveRelay)
+            }
+            SettingRow(L10n.t("Relay key", "中转站密钥")) {
+                GlassTextField(
+                    placeholder: "sk-…",
+                    text: $relayKey,
+                    secure: true,
+                    reveal: $revealRelay,
+                    onSubmit: saveRelay)
+            }
+            HStack(spacing: Design.space2) {
+                Spacer().frame(width: Design.labelColumn + Design.space3 - Design.space2)
+                Button(L10n.t("Save relay", "保存中转站"), action: saveRelay)
+                    .glassAction(prominent: true)
+                    .disabled(relayBase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || relayKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Spacer(minLength: 0)
+            }
+            Text(L10n.t(
+                "The same address and key the CLI uses for this relay. QuotaBar asks it for the account balance. It does not switch which account the CLI uses.",
+                "填写 CLI 正在用的中转站地址和密钥。QuotaBar 只查询该账户余额，不切换 CLI 所用的账号。"))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, Design.labelColumn + Design.space3)
+        }
+    }
+
+    private func saveRelay() {
+        store.setRelay(base: relayBase, key: relayKey, for: id)
+        relayBase = ConfigStore.shared.relayBase(for: id) ?? ""
+        relayKey = ConfigStore.shared.relayKey(for: id) ?? ""
+        testPhase = .idle
     }
 
     private var actions: some View {

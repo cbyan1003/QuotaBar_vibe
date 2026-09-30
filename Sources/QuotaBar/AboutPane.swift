@@ -39,6 +39,14 @@ struct AboutPane: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            Text(L10n.t(
+                "This copy is a derivative by bobo, based on the open-source QuotaBar.",
+                "本版本由 bobo 基于开源项目 QuotaBar 二次开发。"))
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
             VStack(alignment: .leading, spacing: 3) {
                 if let updated = Self.updated {
                     Text(L10n.t("Updated \(updated)", "更新于 \(updated)"))
@@ -129,6 +137,9 @@ struct AboutPane: View {
     /// ask for the notice, and the wordmark's typeface.
     private static var credits: [Credit] {
         [
+            Credit(name: "QuotaBar", author: "GiantAccel, LLC", license: "MIT",
+                   use: L10n.t("The original app this copy is based on", "本版本所基于的原项目"),
+                   url: Self.repository),
             Credit(name: "codex-island", author: "Eric Park", license: "MIT",
                    use: L10n.t("The notch island's look", "刘海岛的样式与动效"),
                    url: "https://github.com/ericjypark/codex-island"),

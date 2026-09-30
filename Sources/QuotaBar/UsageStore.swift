@@ -1175,6 +1175,13 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    func setRelay(base: String, key: String, for id: ProviderID) {
+        config.setRelayBase(base, for: id)
+        config.setRelayKey(key, for: id)
+        refreshConfigured()
+        if isEnabled(id) { refresh([id]) }
+    }
+
     func setCredential(_ value: String, for id: ProviderID) {
         config.setCredential(value, for: id)
         credentialGeneration[id, default: 0] &+= 1
