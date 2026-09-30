@@ -127,13 +127,13 @@ final class CursorUsageTests: XCTestCase {
         XCTAssertTrue(scan.projects.isEmpty, "events without a directory are not a project")
     }
 
-    func testCursorScanStartBackfillsUntilTheArchiveHasCursor() {
+    func testCursorScanStartBackfillsUntilTheArchiveHasCursor() throws {
         var archive = UsageArchive()
         let now = Date(timeIntervalSince1970: 1_780_000_000)
         let calendar = Calendar(identifier: .gregorian)
         let start = archive.cursorScanStart(now: now, calendar: calendar)
         let year = calendar.component(.year, from: now)
-        let floor = calendar.date(from: DateComponents(year: year - 1, month: 1, day: 1))
+        let floor = try XCTUnwrap(calendar.date(from: DateComponents(year: year - 1, month: 1, day: 1)))
         XCTAssertEqual(start, floor)
 
         let key = UsageArchive.dayKey(now)
