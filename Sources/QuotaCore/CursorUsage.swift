@@ -71,8 +71,11 @@ public enum CursorUsage {
             if total == nil { total = parsed.total }
             if parsed.events.isEmpty { break }
             all.append(contentsOf: parsed.events)
-            if let total, all.count >= total { break }
-            if parsed.events.count < pageSize { break }
+            if let total {
+                if all.count >= total { break }
+            } else if parsed.events.count < pageSize {
+                break
+            }
             page += 1
         }
         let horizon = until.addingTimeInterval(5 * 60)
