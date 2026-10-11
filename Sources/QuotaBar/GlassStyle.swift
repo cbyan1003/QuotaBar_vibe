@@ -12,15 +12,12 @@ import QuotaCore
 /// specular hairline, which is a different look but the same visual weight —
 /// the layout does not shift between the two.
 ///
-/// Scope is deliberate. The menu panel, the edge dock and its callout, the
-/// notch island and the desktop widget stay on the flat `Design` surfaces:
-/// they sit over arbitrary wallpaper and have to carry their own contrast,
-/// and glass there puts the user's wallpaper behind the numbers the app
-/// exists to show. Glass on the dock was tried and rejected — a black tint
-/// only colours the glass (74% white over a white window), an ink overlay
-/// on top of it still read as grey, and the owner wanted black. A settings
-/// window is always over the desktop *and* always in front, so it can afford
-/// glass.
+/// Scope is deliberate. The edge dock and its callout, the notch island and
+/// the desktop widget stay on flat dark surfaces: glass there was tried, and
+/// over a light window the numbers disappeared. The menu panel does use
+/// Liquid Glass, with a dark wash under it so the figures stay on a dark field.
+/// A settings window is always over the desktop *and* always in front, so its
+/// cards are glass too.
 // `Glass` is in the macOS 26 SDK. QuotaBar compiles in Swift 5 language mode,
 // so this keys off the compiler, not `#if swift`: Command Line Tools 26.2
 // (Swift 6.2) includes the API; the older 16.4 tools do not.
@@ -30,9 +27,11 @@ private struct LiquidGlassSurface: ViewModifier {
     let radius: CGFloat
     let tint: Color?
     let interactive: Bool
+    /// `.clear` lets more of the desktop through than `.regular`.
+    let clear: Bool
 
     private var glass: Glass {
-        var value = Glass.regular
+        var value: Glass = clear ? .clear : .regular
         if let tint { value = value.tint(tint) }
         if interactive { value = value.interactive() }
         return value
@@ -87,6 +86,7 @@ private struct GlassSurface: ViewModifier {
     let radius: CGFloat
     let tint: Color?
     let interactive: Bool
+    let clear: Bool
 
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -98,7 +98,7 @@ private struct GlassSurface: ViewModifier {
         } else if #available(macOS 26.0, *) {
             #if compiler(>=6.2)
             content.modifier(
-                LiquidGlassSurface(radius: radius, tint: tint, interactive: interactive))
+                LiquidGlassSurface(radius: radius, tint: tint, interactive: interactive, clear: clear))
             #else
             content.modifier(FrostedSurface(radius: radius, tint: tint))
             #endif
@@ -132,9 +132,10 @@ extension View {
     func glassSurface(
         radius: CGFloat = Design.radiusPanel,
         tint: Color? = nil,
-        interactive: Bool = false
+        interactive: Bool = false,
+        clear: Bool = false
     ) -> some View {
-        modifier(GlassSurface(radius: radius, tint: tint, interactive: interactive))
+        modifier(GlassSurface(radius: radius, tint: tint, interactive: interactive, clear: clear))
     }
 
     /// Groups sibling glass shapes so they blend into each other instead of

@@ -844,7 +844,8 @@ enum Snapshot {
         for language in [L10n.Language.en, .zhHans] {
             L10n.override = language
             write(
-                MenuPanelView(store: makeStore(selected: nil), scrollable: false),
+                MenuPanelView(store: makeStore(selected: nil), scrollable: false)
+                    .environment(\.glassDisabled, true),
                 to: base,
                 name: "panel-\(language == .en ? "en" : "zh")",
                 dark: true)

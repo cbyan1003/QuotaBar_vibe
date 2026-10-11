@@ -59,6 +59,57 @@ extension AnyTransition {
 
 /// A tap target that presses like a button but fires in panels that are
 /// never key, where SwiftUI's `Button` does not.
+/// Flat stand-in for a menu card when Liquid Glass cannot be drawn — snapshots
+/// and copied images. The live panel uses `menuGlassCard()`.
+struct MenuCardBackground: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Color.white.opacity(0.06))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.09), lineWidth: 0.5))
+    }
+}
+
+/// A menu-panel card as its own Liquid Glass lens. A dark wash keeps the type
+/// readable; the clear glass and the bright top edge are what stop it reading
+/// as a flat gray block.
+private struct MenuGlassCard: ViewModifier {
+    @Environment(\.glassDisabled) private var disabled
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+    }
+
+    func body(content: Content) -> some View {
+        if disabled {
+            content.background(MenuCardBackground())
+        } else {
+            content
+                .background { shape.fill(Color.black.opacity(0.82)) }
+                .glassSurface(radius: 16, clear: true)
+                .overlay {
+                    shape.strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.42),
+                                Color.white.opacity(0.1),
+                                Color.white.opacity(0.04),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom),
+                        lineWidth: 0.8)
+                }
+        }
+    }
+}
+
+extension View {
+    func menuGlassCard() -> some View {
+        modifier(MenuGlassCard())
+    }
+}
+
 struct Pressable<Label: View>: View {
     let action: () -> Void
     @ViewBuilder let label: () -> Label

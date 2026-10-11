@@ -44,7 +44,7 @@ struct SpendCardView: View {
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.05)))
+        .menuGlassCard()
         .contextMenu {
             if !forExport {
                 Button(L10n.t("Copy as Image", "复制为图片")) { copyImage() }

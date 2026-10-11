@@ -16,6 +16,8 @@ final class MenuPanelController {
     static let shared = MenuPanelController()
 
     static let width: CGFloat = 372
+    /// Outer corner. Large enough to read as a rounded panel, not a square window.
+    static let cornerRadius: CGFloat = 22
 
     private var panel: KeyPanel?
     private weak var store: UsageStore?
@@ -116,6 +118,18 @@ final class MenuPanelController {
         let host = FirstMouseHostingView(rootView: MenuPanelView(store: store))
         host.sizingOptions = []
         panel.contentView = host
+        round(panel)
+    }
+
+    /// The hosting view is what AppKit shadows. Masking it is what makes the
+    /// window itself round; a SwiftUI clip alone leaves the scroll view's
+    /// rectangular plate in the corners.
+    private func round(_ panel: NSPanel) {
+        guard let host = panel.contentView else { return }
+        host.wantsLayer = true
+        host.layer?.masksToBounds = true
+        host.layer?.cornerRadius = Self.cornerRadius
+        host.layer?.cornerCurve = .continuous
     }
 
     private func place(_ panel: NSPanel, animated: Bool) {
@@ -127,14 +141,18 @@ final class MenuPanelController {
         x = min(max(x, visible.minX + 8), visible.maxX - Self.width - 8)
         let top = min(anchorFrame?.minY ?? visible.maxY, visible.maxY) - 6
         let frame = NSRect(x: x, y: top - height, width: Self.width, height: height)
+        round(panel)
         guard animated, !Motion.reduced else {
             panel.setFrame(frame, display: true)
+            panel.invalidateShadow()
             return
         }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.2
             context.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
             panel.animator().setFrame(frame, display: true)
+        } completionHandler: {
+            panel.invalidateShadow()
         }
     }
 
@@ -260,6 +278,55 @@ private struct PanelHeightKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
+/// The menu panel's shell. Clear Liquid Glass, with only a light dark wash so
+/// the blur still shows. The clip is what rounds the window: the glass shape
+/// alone does not mask the scroll view. Snapshots keep the flat fill.
+private struct MenuPanelChrome: ViewModifier {
+    @Environment(\.glassDisabled) private var disabled
+    var translucent: Bool
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: MenuPanelController.cornerRadius, style: .continuous)
+        if disabled {
+            content
+                .background {
+                    if translucent {
+                        shape.fill(.ultraThinMaterial).overlay(shape.fill(Color.black.opacity(0.55)))
+                    } else {
+                        shape.fill(
+                            LinearGradient(
+                                colors: [Color(hex: "1A1B1F"), Color(hex: "0E0F12")],
+                                startPoint: .top,
+                                endPoint: .bottom))
+                    }
+                }
+                .overlay(shape.strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
+                .clipShape(shape)
+        } else {
+            // Panel glass is a layer behind the cards. The cards carry their
+            // own glass; wrapping them in this one flattens it.
+            content
+                .background {
+                    ZStack {
+                        shape.fill(Color.black.opacity(translucent ? 0.78 : 0.86))
+                        Color.clear
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .glassSurface(radius: MenuPanelController.cornerRadius, clear: true)
+                    }
+                    .allowsHitTesting(false)
+                }
+                .overlay {
+                    shape.strokeBorder(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.38), Color.white.opacity(0.06)],
+                            startPoint: .top,
+                            endPoint: .bottom),
+                        lineWidth: 0.75)
+                }
+        }
+    }
+}
+
 struct MenuPanelView: View {
     @ObservedObject var store: UsageStore
     /// Off for off-screen renders, which draw a ScrollView's content as nothing.
@@ -297,6 +364,7 @@ struct MenuPanelView: View {
                     cards.background(ScrollViewHandle.Reader(handle: scroller))
                 }
                     .scrollIndicators(.never)
+                    .scrollContentBackground(.hidden)
                     .background(GeometryReader { proxy in
                         Color.clear
                             .onAppear { viewport = proxy.frame(in: .global) }
@@ -316,18 +384,7 @@ struct MenuPanelView: View {
                 })
         }
         .frame(width: MenuPanelController.width)
-        .background {
-            let shape = RoundedRectangle(cornerRadius: Design.radiusPanel, style: .continuous)
-            if store.experience.panelTranslucent {
-                shape.fill(.ultraThinMaterial).overlay(shape.fill(Color.black.opacity(0.55)))
-            } else {
-                shape.fill(Color.black)
-            }
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: Design.radiusPanel, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
-        .clipShape(RoundedRectangle(cornerRadius: Design.radiusPanel, style: .continuous))
+        .modifier(MenuPanelChrome(translucent: store.experience.panelTranslucent))
         .overlay(alignment: .bottom) {
             if let notice = store.copiedNotice {
                 TransientPill(symbol: "checkmark.circle.fill", text: notice)
@@ -373,6 +430,7 @@ struct MenuPanelView: View {
                     }
                 }
                 .padding(10)
+                .glassGroup(spacing: 4)
                 .onPreferenceChange(CardHeightsKey.self) { cardHeights = $0 }
                 .onChange(of: holdingCard) { _, holding in
                     if !holding { finishReorder() }
@@ -522,7 +580,7 @@ private struct WelcomeCard: View {
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.07)))
+        .menuGlassCard()
     }
 }
 

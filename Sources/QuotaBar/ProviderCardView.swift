@@ -28,9 +28,7 @@ struct ProviderCardView: View {
             content
         }
         .padding(compact ? 10 : 12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(forExport ? 0.06 : 0.05)))
+        .menuGlassCard()
         .contextMenu { if !forExport { contextItems } }
     }
 
@@ -437,6 +435,7 @@ struct ShareableCard<Content: View>: View {
         .frame(width: 380)
         .background(Color.black)
         .environment(\.colorScheme, .dark)
+        .environment(\.glassDisabled, true)
     }
 }
 

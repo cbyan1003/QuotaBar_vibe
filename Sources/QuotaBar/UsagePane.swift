@@ -175,9 +175,14 @@ private struct HeatmapCards: View {
                 DayDetail(day: selected, ledger: ledger, scope: scope)
             }
         }
-        SettingsCard(L10n.t("By model", "按模型")) {
-            ModelList(ledger: ledger, scope: $scope)
+        SettingsCard(modelTitle) {
+            ModelList(ledger: ledger, scope: $scope, day: selected)
         }
+    }
+
+    private var modelTitle: String {
+        guard let selected else { return L10n.t("By model", "按模型") }
+        return L10n.t("By model · \(QuotaFormat.shortDay(selected.day))", "按模型 · \(QuotaFormat.shortDay(selected.day))")
     }
 
     // MARK: Header
@@ -498,21 +503,38 @@ private struct DayDetail: View {
 }
 
 /// Models, largest first, with their share of the current scope. A row is
-/// a filter: click it and the grid shows that model alone.
+/// a filter: click it and the grid shows that model alone. A selected day
+/// ranks that day only; with none selected the rank is the whole year.
 private struct ModelList: View {
     let ledger: UsageLedger
     @Binding var scope: LedgerScope
+    var day: UsageDay?
 
     private var rows: [(model: String, source: CostSource, tokens: Int)] {
-        Array(ledger.models(within: scope.source).prefix(8))
+        let subset: ArraySlice<UsageDay>? = day.flatMap { selected in
+            guard let index = ledger.days.firstIndex(where: { $0.day == selected.day }) else { return nil }
+            return ledger.days[index...index]
+        }
+        return Array(ledger.models(within: scope.source, days: subset).prefix(8))
     }
 
     private var total: Int {
-        ledger.total(scope.source.map { .source($0) } ?? .all)
+        let filter = scope.source.map { LedgerScope.source($0) } ?? .all
+        if let day { return day.tokens(in: filter) }
+        return ledger.total(filter)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.space1) {
+            if rows.isEmpty {
+                Text(day == nil
+                    ? L10n.t("No usage in this range.", "这段时间没有用量。")
+                    : L10n.t("No usage this day.", "这一天没有用量。"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+            }
             ForEach(rows, id: \.model) { row in
                 let on = scope == .model(row.model)
                 Button {

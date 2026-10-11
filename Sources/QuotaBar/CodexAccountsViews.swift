@@ -4,28 +4,31 @@ import QuotaCore
 // MARK: - On the Codex card
 
 /// Under the Codex card's arrow: every kept account, the one the CLI is
-/// signed in as first, each other one with the limit that bites first and
-/// a button to switch to it (issue #6). Nothing until an account is kept.
+/// signed in as first. Each row shows that account's remaining plan quota
+/// and how many banked resets it still holds, and the others can be switched
+/// to (issue #6). Nothing until an account is kept.
 struct CodexAccountsSection: View {
     @ObservedObject var store: UsageStore
     @ObservedObject var accounts: CodexAccountsModel
     var compact = false
 
     var body: some View {
-        if !accounts.saved.isEmpty {
-            VStack(alignment: .leading, spacing: compact ? 6 : 8) {
-                Text(L10n.t("Accounts", "账号"))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white)
-                if let active = activeAccount {
-                    row(active, active: true)
-                }
-                ForEach(accounts.others) { account in
-                    row(account, active: false)
+        Group {
+            if !accounts.saved.isEmpty {
+                VStack(alignment: .leading, spacing: compact ? 6 : 8) {
+                    Text(L10n.t("Accounts", "账号"))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white)
+                    if let active = activeAccount {
+                        row(active, active: true)
+                    }
+                    ForEach(accounts.others) { account in
+                        row(account, active: false)
+                    }
                 }
             }
-            .task { await accounts.reload() }
         }
+        .task { await accounts.readOthers() }
     }
 
     /// The account the CLI is signed in as — kept or not, it is on the card.
@@ -37,34 +40,38 @@ struct CodexAccountsSection: View {
 
     private func row(_ account: CodexAccount, active: Bool) -> some View {
         let reading = accounts.readings[account.id]
-        return VStack(alignment: .leading, spacing: 2) {
+        let accent = Color(hex: ProviderID.codex.accentHex)
+        return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(active ? Color(hex: ProviderID.codex.accentHex) : .white.opacity(0.2))
+                    .fill(active ? accent : .white.opacity(0.22))
                     .frame(width: 6, height: 6)
                 Text(accounts.label(account, masked: store.isPrivacyMasked))
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.white.opacity(active ? 0.9 : 0.7))
+                    .foregroundStyle(.white.opacity(active ? 0.95 : 0.72))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if let plan = CodexProvider.planName(account.plan) {
                     Text(plan.uppercased())
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.white.opacity(0.55))
                 }
                 Spacer(minLength: 6)
                 if active {
                     Text(L10n.t("In use", "使用中"))
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color(hex: ProviderID.codex.accentHex))
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(accent.opacity(0.16)))
                 } else {
                     Pressable(action: { store.switchCodexAccount(account.id) }) {
                         Text(L10n.t("Switch", "切换"))
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.85))
+                            .foregroundStyle(.white.opacity(0.9))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 2)
-                            .background(Capsule().fill(Color.white.opacity(0.1)))
+                            .background(Capsule().fill(Color.white.opacity(0.12)))
                     }
                     .disabled(accounts.working)
                     .help(L10n.t(
@@ -72,35 +79,72 @@ struct CodexAccountsSection: View {
                         "让 Codex CLI 改用这个账号登录。已经在运行的会话要重启后才会用新账号。"))
                 }
             }
-            if !active {
-                Group {
-                    if let window = reading?.snapshot?.headlineWindow, let used = window.usedPercent {
-                        Text(figure(window, used: used))
-                    } else if let error = reading?.error {
-                        Text(error).foregroundStyle(Palette.amber)
-                    } else {
-                        Text(L10n.t("Reading…", "读取中…"))
-                    }
+            Group {
+                if let line = statusLine(account, active: active) {
+                    line
+                } else if !active, let error = reading?.error {
+                    Text(error).foregroundStyle(Palette.amber)
+                } else if active && store.states[.codex]?.snapshot != nil {
+                    EmptyView()
+                } else {
+                    Text(L10n.t("Reading…", "读取中…"))
+                        .foregroundStyle(.white.opacity(0.45))
                 }
-                .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.5))
-                .lineLimit(2)
-                .padding(.leading, 12)
             }
+            .font(.system(size: 10))
+            .lineLimit(2)
+            .padding(.leading, 12)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(active ? accent.opacity(0.12) : Color.white.opacity(0.045)))
     }
 
-    /// "Weekly · 64% left · resets in 3d 2h", in the reading's own terms.
-    private func figure(_ window: UsageWindow, used: Double) -> String {
-        let shown = store.meterMode.shownPercent(fromUsed: used)
-        var parts = [
-            window.shortLabel ?? window.title,
-            store.meterMode == .used
-                ? L10n.t("\(QuotaFormat.percent(shown)) used", "已用 \(QuotaFormat.percent(shown))")
-                : L10n.t("\(QuotaFormat.percent(shown)) left", "剩余 \(QuotaFormat.percent(shown))"),
-        ]
-        if let reset = window.resetsAt { parts.append(store.resetText(reset)) }
-        return parts.joined(separator: " · ")
+    /// "5天 7小时后重置 · 7d 剩余 5% · 剩余 1 次重置". Reset time, then what is
+    /// left, then how many banked resets remain. The signed-in account is the
+    /// Codex card's own reading; the others are read with the sign-in kept here.
+    private func statusLine(_ account: CodexAccount, active: Bool) -> Text? {
+        let snapshot = active
+            ? store.states[.codex]?.snapshot
+            : accounts.readings[account.id]?.snapshot
+        guard let snapshot else { return nil }
+        var pieces: [Text] = []
+        let dot = Text(" · ").foregroundStyle(.white.opacity(0.28))
+        for window in snapshot.ownWindows where window.windowSeconds != nil {
+            guard let used = window.usedPercent else { continue }
+            if let resetsAt = window.resetsAt {
+                pieces.append(Text(store.resetText(resetsAt)).foregroundStyle(.white.opacity(0.5)))
+            }
+            let shown = store.meterMode.shownPercent(fromUsed: used)
+            let name = window.shortLabel ?? window.title
+            let quota = store.meterMode == .used
+                ? L10n.t("\(name) \(QuotaFormat.percent(shown)) used", "\(name) 已用 \(QuotaFormat.percent(shown))")
+                : L10n.t("\(name) \(QuotaFormat.percent(shown)) left", "\(name) 剩余 \(QuotaFormat.percent(shown))")
+            pieces.append(Text(quota).foregroundStyle(quotaInk(used: used)))
+        }
+        if let available = snapshot.resetCredits?.available {
+            pieces.append(Text(L10n.t("\(available) banked resets", "剩余 \(available) 次重置"))
+                .foregroundStyle(.white.opacity(0.5)))
+        }
+        guard let first = pieces.first else { return nil }
+        return pieces.dropFirst().reduce(first) { $0 + dot + $1 }
+    }
+
+    /// The usage ramp's red end is a deep #DC2626, which at 10pt on a dark
+    /// card blooms and the strokes drop out. Pull the same hue toward white
+    /// so "剩余 5%" stays red, and stays readable.
+    private func quotaInk(used: Double) -> Color {
+        var value: UInt64 = 0
+        Scanner(string: UsageRamp.hex(used: used)).scanHexInt64(&value)
+        func lift(_ channel: UInt64) -> Double {
+            (Double(channel) * 0.34 + 255 * 0.66) / 255
+        }
+        return Color(
+            red: lift((value >> 16) & 0xFF),
+            green: lift((value >> 8) & 0xFF),
+            blue: lift(value & 0xFF))
     }
 }
 

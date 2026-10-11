@@ -193,27 +193,38 @@ public actor CodexAccountVault {
         (try? Data(contentsOf: liveURL)).flatMap(CodexAuthFile.init)
     }
 
-    public func accounts() -> [CodexAccount] {
-        guard let raw = storage.read(account: Self.indexKey),
+    public func accounts() async -> [CodexAccount] {
+        guard let raw = await readItem(Self.indexKey),
               let list = try? JSONDecoder().decode([CodexAccount].self, from: Data(raw.utf8))
         else { return [] }
         return list
     }
 
-    func stored(_ id: String) -> CodexAuthFile? {
-        storage.read(account: Self.blobKey(id)).flatMap { CodexAuthFile(Data($0.utf8)) }
+    func stored(_ id: String) async -> CodexAuthFile? {
+        guard let raw = await readItem(Self.blobKey(id)) else { return nil }
+        return CodexAuthFile(Data(raw.utf8))
+    }
+
+    /// The in-memory store tests use never falls through to the login keychain.
+    /// The real one does: a rebuilt app is a new signature, and the direct
+    /// read of an item the previous build saved comes back empty.
+    private func readItem(_ account: String) async -> String? {
+        if storage is KeychainStorage {
+            return Keychain.read(account: account)
+        }
+        return storage.read(account: account)
     }
 
     /// Keeps the account the CLI is signed in as, or updates the copy kept.
     @discardableResult
-    public func saveCurrent(now: Date = .now) throws -> CodexAccount {
+    public func saveCurrent(now: Date = .now) async throws -> CodexAccount {
         guard let live = live() else { throw CodexAccountError.notSignedIn }
-        return try keep(live, now: now)
+        return try await keep(live, now: now)
     }
 
-    public func remove(_ id: String) {
+    public func remove(_ id: String) async {
         storage.delete(account: Self.blobKey(id))
-        writeIndex(accounts().filter { $0.id != id })
+        writeIndex(await accounts().filter { $0.id != id })
     }
 
     /// Makes `id` the account the CLI is signed in as. The account being left
@@ -223,10 +234,10 @@ public actor CodexAccountVault {
     public func switchTo(_ id: String, now: Date = .now) async throws {
         // Its refresh first, so the CLI gets the tokens that came back.
         if let running = refreshing[id] { _ = try? await running.value }
-        guard let target = stored(id) else { throw CodexAccountError.notSaved }
+        guard let target = await stored(id) else { throw CodexAccountError.notSaved }
         let current = live()
         if current?.accountID == id { return }
-        if let current { try keep(current, now: now) }
+        if let current { try await keep(current, now: now) }
         let directory = liveURL.deletingLastPathComponent()
         if let current {
             try write(current.data, to: directory.appendingPathComponent("auth.json.quotabar-backup"))
@@ -240,7 +251,7 @@ public actor CodexAccountVault {
     public func credentials(for id: String, now: Date = .now) async throws -> CodexAuthFile {
         if let live = live(), live.accountID == id { return live }
         if let running = refreshing[id] { return try await running.value }
-        guard let file = stored(id) else { throw CodexAccountError.notSaved }
+        guard let file = await stored(id) else { throw CodexAccountError.notSaved }
         guard file.needsRefresh(now: now) else { return file }
         let job = Task { try await self.refresh(file, now: now) }
         refreshing[id] = job
@@ -257,18 +268,18 @@ public actor CodexAccountVault {
             throw CodexAccountError.signInAgain(email: file.email)
         }
         guard let fresh = file.refreshed(with: tokens, now: now) else { throw ProviderError.badResponse }
-        try keep(fresh, now: now)
+        try await keep(fresh, now: now)
         return fresh
     }
 
     // MARK: Storage
 
     @discardableResult
-    private func keep(_ file: CodexAuthFile, now: Date) throws -> CodexAccount {
+    private func keep(_ file: CodexAuthFile, now: Date) async throws -> CodexAccount {
         guard storage.write(String(decoding: file.data, as: UTF8.self), account: Self.blobKey(file.accountID)) else {
             throw CodexAccountError.keychain
         }
-        var list = accounts()
+        var list = await accounts()
         var summary = file.summary
         if let index = list.firstIndex(where: { $0.id == file.accountID }) {
             summary.savedAt = list[index].savedAt
